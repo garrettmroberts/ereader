@@ -32,16 +32,29 @@ void initDisplay() {
     display.setRotation(0);
 }
 
-void displayText(const char* text) {
+void displayParagraphs(const std::vector<String>& paragraphs) {
+    int x = 5;
+    int y = 10;
+    int lineHeight = 8;
+    int paragraphSpacing = 2;
+
     display.firstPage();
 
     do {
         display.fillScreen(GxEPD_WHITE);
-        display.setCursor(10, 30);
         display.setTextColor(GxEPD_BLACK);
-        display.setTextWrap(true);
-        display.print(text);
-  } while (display.nextPage());
+        display.setTextSize(1);
 
-  display.hibernate();
+
+        for (const String& paragraph : paragraphs) {
+            display.setCursor(x, y);
+            display.print(paragraph);
+
+            int linesPrinted = (display.getCursorY() - y) / lineHeight + 1;
+            y += linesPrinted * lineHeight + paragraphSpacing;
+        }
+
+    } while (display.nextPage());
+
+    display.hibernate();
 }

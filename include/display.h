@@ -1,4 +1,6 @@
 #pragma once
+#include <vector>
+#include <Arduino.h>
 
 void initDisplay();
-void displayText(const char* text);
+void displayParagraphs(const std::vector<String>& paragraphs);
