@@ -496,6 +496,24 @@ struct ManifestItem {
 
 std::vector<Chapter> chapters;
 bool indexed = false;
+String indexedPath;
+
+bool readZipItems(File& file, std::vector<ZipItem>& items) {
+    if (!file.seek(0)) {
+        return false;
+    }
+    while (true) {
+        ZipItem item;
+        if (!readEntry(file, item)) {
+            break;
+        }
+        items.push_back(item);
+        if (!skipEntry(file, item.compSize)) {
+            break;
+        }
+    }
+    return !items.empty();
+}
 
 bool readAttr(const char* start, const char* end, const char* key, char* out, size_t outLen) {
     const size_t keyLen = strlen(key);
@@ -678,26 +696,26 @@ bool addSpineChapters(File& file, const std::vector<ZipItem>& items, const ZipIt
 }
 
 bool ensureIndex(const char* path) {
-    if (indexed) {
+    if (indexed && indexedPath == path) {
         return true;
     }
+
+    chapters.clear();
+    indexed = false;
+    indexedPath = path;
 
     File file = LittleFS.open(path, "r");
     if (!file) {
         Serial.println("Failed to open epub.");
+        indexedPath = "";
         return false;
     }
 
     std::vector<ZipItem> items;
-    while (true) {
-        ZipItem item;
-        if (!readEntry(file, item)) {
-            break;
-        }
-        items.push_back(item);
-        if (!skipEntry(file, item.compSize)) {
-            break;
-        }
+    if (!readZipItems(file, items)) {
+        file.close();
+        indexedPath = "";
+        return false;
     }
 
     const ZipItem* opf = nullptr;
@@ -723,6 +741,203 @@ bool ensureIndex(const char* path) {
     file.close();
     indexed = true;
     return true;
+}
+
+struct FileSink {
+    File* out = nullptr;
+    uint8_t buf[256] = {};
+    size_t len = 0;
+    bool ok = true;
+
+    bool full() const { return !ok; }
+
+    void feed(uint8_t b) {
+        if (!ok) {
+            return;
+        }
+        buf[len++] = b;
+        if (len == sizeof(buf)) {
+            flush();
+        }
+    }
+
+    void flush() {
+        if (ok && len > 0 && out->write(buf, len) != len) {
+            ok = false;
+        }
+        len = 0;
+    }
+};
+
+bool copyStored(File& epub, uint32_t offset, uint32_t size, File& dest) {
+    if (!epub.seek(offset)) {
+        return false;
+    }
+    uint8_t buf[256];
+    uint32_t left = size;
+    while (left > 0) {
+        const size_t want = left < sizeof(buf) ? left : sizeof(buf);
+        const size_t n = epub.read(buf, want);
+        if (n == 0) {
+            return false;
+        }
+        if (dest.write(buf, n) != n) {
+            return false;
+        }
+        left -= n;
+    }
+    return true;
+}
+
+bool writeEntry(File& epub, const ZipItem& item, File& dest) {
+    if (item.method == 0) {
+        return copyStored(epub, item.dataOffset, item.compSize, dest);
+    }
+    if (item.method != 8 || !epub.seek(item.dataOffset)) {
+        return false;
+    }
+    FileSink sink;
+    sink.out = &dest;
+    const bool ok = feedDeflate(epub, item.compSize, sink);
+    sink.flush();
+    return ok && sink.ok;
+}
+
+bool hrefOfId(const char* xml, const char* id, char* href, size_t hrefLen) {
+    const char* p = xml;
+    while ((p = strstr(p, "<item")) != nullptr) {
+        if (strncmp(p, "<itemref", 8) == 0) {
+            p += 8;
+            continue;
+        }
+        const char* end = strchr(p, '>');
+        if (end == nullptr) {
+            break;
+        }
+        char itemId[48];
+        if (readAttr(p, end, "id", itemId, sizeof(itemId)) && strcmp(itemId, id) == 0) {
+            return readAttr(p, end, "href", href, hrefLen);
+        }
+        p = end + 1;
+    }
+    return false;
+}
+
+bool findCoverHref(const char* xml, char* href, size_t hrefLen) {
+    const char* p = xml;
+    while ((p = strstr(p, "<item")) != nullptr) {
+        if (strncmp(p, "<itemref", 8) == 0) {
+            p += 8;
+            continue;
+        }
+        const char* end = strchr(p, '>');
+        if (end == nullptr) {
+            break;
+        }
+        char props[80];
+        if (readAttr(p, end, "properties", props, sizeof(props)) && strstr(props, "cover-image") != nullptr &&
+            readAttr(p, end, "href", href, hrefLen)) {
+            return true;
+        }
+        p = end + 1;
+    }
+
+    p = xml;
+    while ((p = strstr(p, "<meta")) != nullptr) {
+        const char* end = strchr(p, '>');
+        if (end == nullptr) {
+            break;
+        }
+        char name[32];
+        char content[48];
+        if (readAttr(p, end, "name", name, sizeof(name)) && strcmp(name, "cover") == 0 &&
+            readAttr(p, end, "content", content, sizeof(content)) &&
+            hrefOfId(xml, content, href, hrefLen)) {
+            return true;
+        }
+        p = end + 1;
+    }
+    return false;
+}
+
+bool findCover(const char* path, EpubCover& cover) {
+    File file = LittleFS.open(path, "r");
+    if (!file) {
+        return false;
+    }
+
+    std::vector<ZipItem> items;
+    if (!readZipItems(file, items)) {
+        file.close();
+        return false;
+    }
+
+    const ZipItem* opf = nullptr;
+    for (const ZipItem& item : items) {
+        if (endsWith(item.name, ".opf")) {
+            opf = &item;
+            break;
+        }
+    }
+    if (opf == nullptr) {
+        file.close();
+        return false;
+    }
+
+    char* xml = nullptr;
+    size_t xmlLen = 0;
+    if (!readRaw(file, *opf, xml, xmlLen)) {
+        file.close();
+        return false;
+    }
+
+    char href[96];
+    const bool foundHref = findCoverHref(xml, href, sizeof(href));
+    free(xml);
+    if (!foundHref) {
+        file.close();
+        return false;
+    }
+
+    char full[160];
+    if (!joinOpfPath(opf->name, href, full, sizeof(full))) {
+        file.close();
+        return false;
+    }
+    const ZipItem* image = findItem(items, full);
+    file.close();
+    if (image == nullptr || image->compSize == 0) {
+        return false;
+    }
+
+    cover.method = image->method;
+    cover.offset = image->dataOffset;
+    cover.size = image->compSize;
+    return true;
+}
+
+bool extractCover(const char* epubPath, const EpubCover& cover, const char* destPath) {
+    File epub = LittleFS.open(epubPath, "r");
+    if (!epub) {
+        return false;
+    }
+    File dest = LittleFS.open(destPath, "w");
+    if (!dest) {
+        epub.close();
+        return false;
+    }
+
+    ZipItem item;
+    item.method = cover.method;
+    item.compSize = cover.size;
+    item.dataOffset = cover.offset;
+    const bool ok = writeEntry(epub, item, dest);
+    dest.close();
+    epub.close();
+    if (!ok) {
+        LittleFS.remove(destPath);
+    }
+    return ok;
 }
 
 }  // namespace
@@ -765,3 +980,19 @@ bool loadEpubChapter(const char* path, size_t index, String& text) {
     }
     return ok;
 }
+
+bool epubFindCover(const char* path, EpubCover& cover) {
+    return findCover(path, cover);
+}
+
+bool epubExtract(const char* epubPath, const EpubCover& cover, const char* destPath) {
+    return extractCover(epubPath, cover, destPath);
+}
+
+#ifdef UNIT_TEST
+void epubResetForTest() {
+    chapters.clear();
+    indexed = false;
+    indexedPath = "";
+}
+#endif

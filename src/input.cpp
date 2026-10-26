@@ -3,10 +3,10 @@
 #include <Arduino.h>
 
 namespace Input {
-    constexpr int BUTTON1_PIN = 25;
-    constexpr int BUTTON2_PIN = 26;
-    constexpr unsigned long DEBOUNCE_MS = 50;
-    constexpr unsigned long LONG_PRESS_MS = 500;
+    constexpr int BUTTON1_PIN = kPrevPin;
+    constexpr int BUTTON2_PIN = kNextPin;
+    constexpr unsigned long DEBOUNCE_MS = kDebounceMs;
+    constexpr unsigned long LONG_PRESS_MS = kLongPressMs;
 
     struct Button {
         int pin;
@@ -15,6 +15,7 @@ namespace Input {
         unsigned long lastDebounceTime = 0;
         unsigned long pressedAt = 0;
         bool longFired = false;
+        Press pending = Press::None;
     };
 
     Button prevButton{BUTTON1_PIN};
@@ -25,7 +26,7 @@ namespace Input {
         pinMode(BUTTON2_PIN, INPUT_PULLUP);
     }
 
-    Press poll(Button& button) {
+    void update(Button& button) {
         const int reading = digitalRead(button.pin);
         if (reading != button.lastReading) {
             button.lastDebounceTime = millis();
@@ -33,35 +34,72 @@ namespace Input {
         }
 
         if (millis() - button.lastDebounceTime <= DEBOUNCE_MS) {
-            return Press::None;
+            return;
         }
 
-        if (reading != button.buttonState) {
-            button.buttonState = reading;
-            if (reading == LOW) {
-                button.pressedAt = millis();
-                button.longFired = false;
-                return Press::None;
-            }
-            if (!button.longFired) {
-                return Press::Short;
-            }
-            return Press::None;
+        if (reading == button.buttonState) {
+            return;
         }
 
-        if (button.buttonState == LOW && !button.longFired &&
-            millis() - button.pressedAt >= LONG_PRESS_MS) {
-            button.longFired = true;
-            return Press::Long;
+        button.buttonState = reading;
+        if (reading == LOW) {
+            button.pressedAt = millis();
+            button.longFired = false;
+            return;
         }
-        return Press::None;
+        if (!button.longFired) {
+            button.pending = Press::Short;
+        }
     }
 
-    Press button1() {
-        return poll(prevButton);
+    bool held(const Button& button) {
+        return button.buttonState == LOW;
     }
 
-    Press button2() {
-        return poll(nextButton);
+    bool longReady(const Button& button) {
+        return held(button) && !button.longFired && millis() - button.pressedAt >= LONG_PRESS_MS;
     }
+
+    Gesture read() {
+        update(prevButton);
+        update(nextButton);
+
+        Gesture gesture;
+        gesture.prev = prevButton.pending;
+        gesture.next = nextButton.pending;
+        prevButton.pending = Press::None;
+        nextButton.pending = Press::None;
+
+        const bool prevDown = held(prevButton);
+        const bool nextDown = held(nextButton);
+        const bool prevLong = longReady(prevButton);
+        const bool nextLong = longReady(nextButton);
+
+        if (prevDown && nextDown && prevLong && nextLong) {
+            prevButton.longFired = true;
+            nextButton.longFired = true;
+            gesture.prev = Press::None;
+            gesture.next = Press::None;
+            gesture.bothLong = true;
+            return gesture;
+        }
+
+        // While the other button is down, wait. It may become a two-button hold.
+        if (prevLong && !nextDown) {
+            prevButton.longFired = true;
+            gesture.prev = Press::Long;
+        }
+        if (nextLong && !prevDown) {
+            nextButton.longFired = true;
+            gesture.next = Press::Long;
+        }
+        return gesture;
+    }
+
+#ifdef UNIT_TEST
+    void resetForTest() {
+        prevButton = Button{BUTTON1_PIN};
+        nextButton = Button{BUTTON2_PIN};
+    }
+#endif
 }
