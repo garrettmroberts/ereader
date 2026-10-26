@@ -4,8 +4,8 @@
 
 
 namespace Input {
-    constexpr int BUTTON1_PIN = 26;
-    constexpr int BUTTON2_PIN = 25;
+    constexpr int BUTTON1_PIN = 25;
+    constexpr int BUTTON2_PIN = 26;
     constexpr unsigned long DEBOUNCE_MS = 50;
 
     struct Button {
@@ -34,7 +34,7 @@ namespace Input {
             if (reading != button.buttonState) {
                 button.buttonState = reading;
 
-                if (button.buttonState == LOW) {
+                if (button.buttonState == HIGH) {
                     button.lastReading = reading;
                     return true;
                 }

@@ -3,7 +3,10 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <vector>
-#include <tuple>
+
+String bookText;
+std::vector<size_t> pageStarts;
+size_t pageIndex = 0;
 
 String readTextFile(const char* path) {
   Serial.println(path);
@@ -21,17 +24,18 @@ String readTextFile(const char* path) {
   return contents;
 }
 
-std::tuple<String, int> getParagraph(const String& text) {
-    int index = text.indexOf('\n');
+void showPage() {
+  if (pageStarts.empty()) {
+    return;
+  }
 
-    if (index == -1) {
-        return std::make_tuple(text, text.length());
-    }
-
-    String paragraph = text.substring(0, index);
-    paragraph.trim();
-
-    return std::make_tuple(paragraph, index);
+  Serial.print("Page ");
+  Serial.print(pageIndex + 1);
+  Serial.print("/");
+  Serial.print(pageStarts.size());
+  Serial.print(" @ ");
+  Serial.println(pageStarts[pageIndex]);
+  drawPage(bookText, pageStarts[pageIndex]);
 }
 
 void setup() {
@@ -45,27 +49,28 @@ void setup() {
     Serial.println("Failed to mount LittleFS");
     return;
   }
-  
-  String text = readTextFile("/snippet.txt");
 
-  int newLineIdx = 0;
-  std::vector<String> paragraphs;
+  bookText = readTextFile("/snippet.txt");
+  pageStarts = paginate(bookText);
+  pageIndex = 0;
 
-  while (newLineIdx < text.length()) {
-    auto p = getParagraph(text.substring(newLineIdx));
-    paragraphs.push_back(std::get<0>(p));
-    newLineIdx += std::get<1>(p) + 1;
+  if (pageStarts.empty()) {
+    Serial.println("Pages: 0");
+    drawPage(bookText, 0);
+    return;
   }
 
-  displayParagraphs(paragraphs);
+  showPage();
 }
 
 void loop() {
-  if (Input::button1Pressed()) {
-    Serial.println("Prev");
+  if (Input::button1Pressed() && pageIndex > 0) {
+    pageIndex--;
+    showPage();
   }
 
-  if (Input::button2Pressed()) {
-    Serial.println("Next");
+  if (Input::button2Pressed() && pageIndex + 1 < pageStarts.size()) {
+    pageIndex++;
+    showPage();
   }
 }

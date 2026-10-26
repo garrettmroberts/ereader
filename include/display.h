@@ -1,6 +1,10 @@
 #pragma once
-#include <vector>
+
 #include <Arduino.h>
+#include <vector>
 
 void initDisplay();
-void displayParagraphs(const std::vector<String>& paragraphs);
+
+// Byte offsets where each screen starts. The next screen starts at the following offset.
+std::vector<size_t> paginate(const String& text);
+void drawPage(const String& text, size_t offset);
