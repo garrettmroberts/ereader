@@ -1,8 +1,9 @@
 #pragma once
 
 namespace Input {
+    enum class Press { None, Short, Long };
+
     void init();
-    bool button1Pressed();
-    bool button2Pressed();
-    
+    Press button1();
+    Press button2();
 }

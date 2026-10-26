@@ -2,54 +2,66 @@
 #include <esp32-hal-gpio.h>
 #include <Arduino.h>
 
-
 namespace Input {
     constexpr int BUTTON1_PIN = 25;
     constexpr int BUTTON2_PIN = 26;
     constexpr unsigned long DEBOUNCE_MS = 50;
+    constexpr unsigned long LONG_PRESS_MS = 500;
 
     struct Button {
         int pin;
         int lastReading = HIGH;
         int buttonState = HIGH;
         unsigned long lastDebounceTime = 0;
+        unsigned long pressedAt = 0;
+        bool longFired = false;
     };
 
-    Button button1 {BUTTON1_PIN};
-    Button button2 {BUTTON2_PIN};
+    Button prevButton{BUTTON1_PIN};
+    Button nextButton{BUTTON2_PIN};
 
     void init() {
         pinMode(BUTTON1_PIN, INPUT_PULLUP);
         pinMode(BUTTON2_PIN, INPUT_PULLUP);
     }
 
-    bool wasPressed(Button& button) {
-        int reading = digitalRead(button.pin);
-        
+    Press poll(Button& button) {
+        const int reading = digitalRead(button.pin);
         if (reading != button.lastReading) {
             button.lastDebounceTime = millis();
+            button.lastReading = reading;
         }
 
-        if (millis() - button.lastDebounceTime > DEBOUNCE_MS) {
-            if (reading != button.buttonState) {
-                button.buttonState = reading;
+        if (millis() - button.lastDebounceTime <= DEBOUNCE_MS) {
+            return Press::None;
+        }
 
-                if (button.buttonState == HIGH) {
-                    button.lastReading = reading;
-                    return true;
-                }
+        if (reading != button.buttonState) {
+            button.buttonState = reading;
+            if (reading == LOW) {
+                button.pressedAt = millis();
+                button.longFired = false;
+                return Press::None;
             }
+            if (!button.longFired) {
+                return Press::Short;
+            }
+            return Press::None;
         }
 
-        button.lastReading = reading;
-        return false;
+        if (button.buttonState == LOW && !button.longFired &&
+            millis() - button.pressedAt >= LONG_PRESS_MS) {
+            button.longFired = true;
+            return Press::Long;
+        }
+        return Press::None;
     }
 
-    bool button1Pressed() {
-        return wasPressed(button1);
+    Press button1() {
+        return poll(prevButton);
     }
 
-    bool button2Pressed() {
-        return wasPressed(button2);
+    Press button2() {
+        return poll(nextButton);
     }
 }

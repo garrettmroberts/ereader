@@ -640,6 +640,7 @@ bool addSpineChapters(File& file, const std::vector<ZipItem>& items, const ZipIt
     if (!readRaw(file, opf, xml, xmlLen)) {
         return false;
     }
+    (void)xmlLen;
 
     std::vector<ManifestItem> manifest;
     parseManifest(xml, manifest);

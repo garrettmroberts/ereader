@@ -66,13 +66,18 @@ void setup() {
     return;
   }
 
-  if (!openChapter(0, false)) {
+  if (!openChapter(4, false)) {
     Serial.println("Failed to open epub");
   }
 }
 
 void loop() {
-  if (Input::button1Pressed()) {
+  const Input::Press prev = Input::button1();
+  if (prev == Input::Press::Long) {
+    if (chapterIndex > 0) {
+      openChapter(chapterIndex - 1, false);
+    }
+  } else if (prev == Input::Press::Short) {
     if (pageIndex > 0) {
       pageIndex--;
       showPage();
@@ -81,7 +86,10 @@ void loop() {
     }
   }
 
-  if (Input::button2Pressed()) {
+  const Input::Press next = Input::button2();
+  if (next == Input::Press::Long) {
+    openChapter(chapterIndex + 1, false);
+  } else if (next == Input::Press::Short) {
     if (!pageStarts.empty() && pageIndex + 1 < pageStarts.size()) {
       pageIndex++;
       showPage();
