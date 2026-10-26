@@ -1,4 +1,5 @@
 #include "display.h"
+#include "input.h"
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <vector>
@@ -36,6 +37,8 @@ std::tuple<String, int> getParagraph(const String& text) {
 void setup() {
   Serial.begin(115200);
   delay(1000);
+
+  Input::init();
   initDisplay();
 
   if (!LittleFS.begin()) {
@@ -58,4 +61,11 @@ void setup() {
 }
 
 void loop() {
+  if (Input::button1Pressed()) {
+    Serial.println("Prev");
+  }
+
+  if (Input::button2Pressed()) {
+    Serial.println("Next");
+  }
 }
