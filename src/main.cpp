@@ -1,41 +1,57 @@
 #include "display.h"
+#include "epub.h"
 #include "input.h"
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <vector>
 
+const char* bookPath = "/walden.epub";
 String bookText;
 std::vector<size_t> pageStarts;
+size_t chapterIndex = 0;
 size_t pageIndex = 0;
-
-String readTextFile(const char* path) {
-  Serial.println(path);
-  File file = LittleFS.open(path, "r");
-
-  if (!file) {
-    Serial.println("Failed to open file.");
-    return "";
-  }
-
-  String contents = file.readString();
-
-  file.close();
-
-  return contents;
-}
 
 void showPage() {
   if (pageStarts.empty()) {
     return;
   }
 
-  Serial.print("Page ");
+  Serial.print("Chapter ");
+  Serial.print(chapterIndex + 1);
+  Serial.print(" page ");
   Serial.print(pageIndex + 1);
   Serial.print("/");
   Serial.print(pageStarts.size());
   Serial.print(" @ ");
   Serial.println(pageStarts[pageIndex]);
   drawPage(bookText, pageStarts[pageIndex]);
+}
+
+bool openChapter(size_t index, bool lastPage) {
+  if (index >= epubChapterCount(bookPath)) {
+    return false;
+  }
+
+  bookText = "";
+  pageStarts.clear();
+  if (!loadEpubChapter(bookPath, index, bookText)) {
+    Serial.println("Failed to load chapter");
+    drawPage(bookText, 0);
+    return false;
+  }
+
+  chapterIndex = index;
+  pageStarts = paginate(bookText);
+  if (pageStarts.empty()) {
+    pageIndex = 0;
+    Serial.println("Pages: 0");
+    drawPage(bookText, 0);
+    return true;
+  }
+
+  pageIndex = lastPage ? pageStarts.size() - 1 : 0;
+  showPage();
+  return true;
 }
 
 void setup() {
@@ -50,27 +66,27 @@ void setup() {
     return;
   }
 
-  bookText = readTextFile("/snippet.txt");
-  pageStarts = paginate(bookText);
-  pageIndex = 0;
-
-  if (pageStarts.empty()) {
-    Serial.println("Pages: 0");
-    drawPage(bookText, 0);
-    return;
+  if (!openChapter(0, false)) {
+    Serial.println("Failed to open epub");
   }
-
-  showPage();
 }
 
 void loop() {
-  if (Input::button1Pressed() && pageIndex > 0) {
-    pageIndex--;
-    showPage();
+  if (Input::button1Pressed()) {
+    if (pageIndex > 0) {
+      pageIndex--;
+      showPage();
+    } else if (chapterIndex > 0) {
+      openChapter(chapterIndex - 1, true);
+    }
   }
 
-  if (Input::button2Pressed() && pageIndex + 1 < pageStarts.size()) {
-    pageIndex++;
-    showPage();
+  if (Input::button2Pressed()) {
+    if (!pageStarts.empty() && pageIndex + 1 < pageStarts.size()) {
+      pageIndex++;
+      showPage();
+    } else {
+      openChapter(chapterIndex + 1, false);
+    }
   }
 }
