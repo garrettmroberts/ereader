@@ -20,6 +20,9 @@
 void appSetup();
 void appLoop();
 
+extern bool hostCardOn;
+extern String bookPath;
+
 namespace {
 
 constexpr int kTestColumns = 5;
@@ -60,11 +63,6 @@ void tap(Input::Gesture value) {
     appLoop();
 }
 
-void setRoot(std::initializer_list<HostRootEntry> entries) {
-    hostFs().root.assign(entries.begin(), entries.end());
-    hostFs().rootSet = true;
-}
-
 std::string positionsFile() {
     const auto found = hostFs().files.find("/positions.txt");
     if (found == hostFs().files.end()) {
@@ -73,13 +71,35 @@ std::string positionsFile() {
     return found->second;
 }
 
+const char* kBook = "/Thoreau/walden.epub";
+
+void addAuthorFile(const char* author, const char* name, bool directory) {
+    const std::string authorPath = std::string("/") + author;
+    const std::string child = authorPath + "/" + name;
+    for (HostRootEntry& entry : hostCard().root) {
+        if (entry.path == authorPath) {
+            entry.children.push_back({child, directory, {}});
+            return;
+        }
+    }
+    HostRootEntry folder;
+    folder.path = authorPath;
+    folder.directory = true;
+    folder.children.push_back({child, directory, {}});
+    hostCard().root.push_back(folder);
+    hostCard().rootSet = true;
+    hostCardOn = true;
+}
+
 void stock() {
-    catalog["/walden.epub"] = {{kChapter0, true}, {kChapter1, true}, {kChapter2, true}};
-    catalog["/aaa.epub"] = {{"other", true}};
+    catalog[kBook] = {{kChapter0, true}, {kChapter1, true}, {kChapter2, true}};
+    catalog["/A/aaa.epub"] = {{"other", true}};
 }
 
 void boot() {
     stock();
+    addAuthorFile("Thoreau", "walden.epub", false);
+    bookPath = kBook;
     appSetup();
     paints.clear();
 }
@@ -237,7 +257,9 @@ extern "C" void test_positions_skip_bad_lines_and_keep_carriage_return(void) {
 
 extern "C" void test_boot_opens_the_saved_page_with_a_full_refresh(void) {
     stock();
-    hostFs().files["/positions.txt"] = "/walden.epub\t1\t0\n";
+    addAuthorFile("Thoreau", "walden.epub", false);
+    bookPath = kBook;
+    hostFs().files["/positions.txt"] = std::string(kBook) + "\t1\t0\n";
     appSetup();
 
     TEST_ASSERT_EQUAL_INT(1, chapterIndex);
@@ -250,7 +272,9 @@ extern "C" void test_boot_opens_the_saved_page_with_a_full_refresh(void) {
 
 extern "C" void test_boot_clamps_a_saved_page_past_the_end(void) {
     stock();
-    hostFs().files["/positions.txt"] = "/walden.epub\t0\t50\n";
+    addAuthorFile("Thoreau", "walden.epub", false);
+    bookPath = kBook;
+    hostFs().files["/positions.txt"] = std::string(kBook) + "\t0\t50\n";
     appSetup();
 
     TEST_ASSERT_EQUAL_INT(2, pageStarts.size());
@@ -265,28 +289,32 @@ extern "C" void test_boot_reports_failure_without_a_book(void) {
 
     hostFs().mounted = true;
     appSetup();
-    TEST_ASSERT_EQUAL_INT(0, paints.size());
+    TEST_ASSERT_EQUAL_INT(1, paints.size());
+    TEST_ASSERT_TRUE(paints.back().library);
     TEST_ASSERT_EQUAL_INT(0, chapterIndex);
 }
 
 extern "C" void test_saved_chapter_past_the_end_does_not_paint(void) {
     stock();
-    hostFs().files["/positions.txt"] = "/walden.epub\t9\t0\n";
+    addAuthorFile("Thoreau", "walden.epub", false);
+    bookPath = kBook;
+    hostFs().files["/positions.txt"] = std::string(kBook) + "\t9\t0\n";
     appSetup();
-    TEST_ASSERT_EQUAL_INT(0, paints.size());
+    TEST_ASSERT_EQUAL_INT(1, paints.size());
+    TEST_ASSERT_TRUE(paints.back().library);
     TEST_ASSERT_EQUAL_INT(0, chapterIndex);
 }
 
 extern "C" void test_short_presses_turn_pages_and_cross_chapters(void) {
     boot();
     TEST_ASSERT_EQUAL_INT(2, pageStarts.size());
-    TEST_ASSERT_EQUAL_STRING("/walden.epub\t0\t0\n", positionsFile().c_str());
+    TEST_ASSERT_EQUAL_STRING((std::string(kBook) + "\t0\t0\n").c_str(), positionsFile().c_str());
 
     tap(gesture(Input::Press::None, Input::Press::Short));
     TEST_ASSERT_EQUAL_INT(0, chapterIndex);
     TEST_ASSERT_EQUAL_INT(1, pageIndex);
     TEST_ASSERT_FALSE(paints.back().full);
-    TEST_ASSERT_EQUAL_STRING("/walden.epub\t0\t1\n", positionsFile().c_str());
+    TEST_ASSERT_EQUAL_STRING((std::string(kBook) + "\t0\t1\n").c_str(), positionsFile().c_str());
 
     tap(gesture(Input::Press::Short, Input::Press::None));
     TEST_ASSERT_EQUAL_INT(0, pageIndex);
@@ -342,7 +370,7 @@ extern "C" void test_long_press_changes_chapter_from_the_first_page(void) {
 
 extern "C" void test_failed_chapter_load_paints_an_empty_full_page(void) {
     boot();
-    catalog["/walden.epub"][1].ok = false;
+    catalog[kBook][1].ok = false;
     const int before = paints.size();
     TEST_ASSERT_FALSE(openChapter(1, 0, false));
     TEST_ASSERT_EQUAL_INT(0, chapterIndex);
@@ -362,22 +390,21 @@ extern "C" void test_empty_chapter_is_a_full_refresh(void) {
 
 extern "C" void test_library_lists_epubs_and_ignores_other_files(void) {
     boot();
-    setRoot({
-        {"notes.txt", false},
-        {"Plain.EPUB", false},
-        {"/walden.epub", false},
-        {"subdir", true},
-    });
+    hostCard().reset();
+    addAuthorFile("Thoreau", "notes.txt", false);
+    addAuthorFile("Thoreau", "Plain.EPUB", false);
+    addAuthorFile("Thoreau", "walden.epub", false);
+    addAuthorFile("Thoreau", "subdir", true);
     tap(gesture(Input::Press::None, Input::Press::None, true));
 
     TEST_ASSERT_TRUE(inLibrary);
     TEST_ASSERT_EQUAL_INT(2, books.size());
-    TEST_ASSERT_EQUAL_STRING("/Plain.EPUB", books[0].c_str());
-    TEST_ASSERT_EQUAL_STRING("/walden.epub", books[1].c_str());
+    TEST_ASSERT_EQUAL_STRING("/Thoreau/Plain.EPUB", books[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("/Thoreau/walden.epub", books[1].c_str());
     TEST_ASSERT_EQUAL_INT(1, bookPick);
     TEST_ASSERT_TRUE(paints.back().library);
     TEST_ASSERT_TRUE(paints.back().full);
-    TEST_ASSERT_EQUAL_STRING("/walden.epub", paints.back().text.c_str());
+    TEST_ASSERT_EQUAL_STRING("/Thoreau/walden.epub", paints.back().text.c_str());
 
     const int shown = paints.size();
     tap(gesture(Input::Press::None, Input::Press::None, true));
@@ -389,7 +416,9 @@ extern "C" void test_library_lists_epubs_and_ignores_other_files(void) {
 extern "C" void test_library_navigation_is_partial_and_opens_the_saved_place(void) {
     boot();
     tap(gesture(Input::Press::None, Input::Press::Short));
-    setRoot({{"/walden.epub", false}, {"/aaa.epub", false}});
+    hostCard().reset();
+    addAuthorFile("A", "aaa.epub", false);
+    addAuthorFile("Thoreau", "walden.epub", false);
     tap(gesture(Input::Press::None, Input::Press::None, true));
     TEST_ASSERT_EQUAL_INT(1, bookPick);
 
@@ -397,7 +426,7 @@ extern "C" void test_library_navigation_is_partial_and_opens_the_saved_place(voi
     TEST_ASSERT_EQUAL_INT(0, bookPick);
     TEST_ASSERT_TRUE(paints.back().library);
     TEST_ASSERT_FALSE(paints.back().full);
-    TEST_ASSERT_EQUAL_STRING("/aaa.epub", paints.back().text.c_str());
+    TEST_ASSERT_EQUAL_STRING("/A/aaa.epub", paints.back().text.c_str());
 
     tap(gesture(Input::Press::Short, Input::Press::None));
     TEST_ASSERT_EQUAL_INT(1, bookPick);
@@ -407,7 +436,7 @@ extern "C" void test_library_navigation_is_partial_and_opens_the_saved_place(voi
     TEST_ASSERT_EQUAL_INT(0, bookPick);
     tap(gesture(Input::Press::None, Input::Press::Long));
     TEST_ASSERT_FALSE(inLibrary);
-    TEST_ASSERT_EQUAL_STRING("/aaa.epub", bookPath.c_str());
+    TEST_ASSERT_EQUAL_STRING("/A/aaa.epub", bookPath.c_str());
     TEST_ASSERT_EQUAL_INT(0, chapterIndex);
     TEST_ASSERT_EQUAL_INT(0, pageIndex);
     TEST_ASSERT_FALSE(paints.back().library);
@@ -415,20 +444,19 @@ extern "C" void test_library_navigation_is_partial_and_opens_the_saved_place(voi
 
     tap(gesture(Input::Press::None, Input::Press::None, true));
     tap(gesture(Input::Press::None, Input::Press::Short));
-    TEST_ASSERT_EQUAL_STRING("/walden.epub", books[bookPick].c_str());
+    TEST_ASSERT_EQUAL_STRING(kBook, books[bookPick].c_str());
     tap(gesture(Input::Press::None, Input::Press::Long));
-    TEST_ASSERT_EQUAL_STRING("/walden.epub", bookPath.c_str());
+    TEST_ASSERT_EQUAL_STRING(kBook, bookPath.c_str());
     TEST_ASSERT_EQUAL_INT(0, chapterIndex);
     TEST_ASSERT_EQUAL_INT(1, pageIndex);
     TEST_ASSERT_TRUE(paints.back().full);
-    TEST_ASSERT_TRUE(positionsFile().find("/walden.epub\t0\t1\n") != std::string::npos);
-    TEST_ASSERT_TRUE(positionsFile().find("/aaa.epub\t0\t0\n") != std::string::npos);
+    TEST_ASSERT_TRUE(positionsFile().find(std::string(kBook) + "\t0\t1\n") != std::string::npos);
+    TEST_ASSERT_TRUE(positionsFile().find("/A/aaa.epub\t0\t0\n") != std::string::npos);
 }
 
 extern "C" void test_single_book_library_only_opens_on_long_next(void) {
     boot();
     tap(gesture(Input::Press::None, Input::Press::Short));
-    setRoot({{"/walden.epub", false}});
     tap(gesture(Input::Press::None, Input::Press::None, true));
     const int shown = paints.size();
 
@@ -447,13 +475,14 @@ extern "C" void test_single_book_library_only_opens_on_long_next(void) {
 
 extern "C" void test_unreadable_book_returns_to_the_library(void) {
     boot();
-    setRoot({{"/broken.epub", false}});
+    hostCard().reset();
+    addAuthorFile("X", "broken.epub", false);
     tap(gesture(Input::Press::None, Input::Press::None, true));
     paints.clear();
 
     tap(gesture(Input::Press::None, Input::Press::Long));
     TEST_ASSERT_TRUE(inLibrary);
-    TEST_ASSERT_EQUAL_STRING("/broken.epub", bookPath.c_str());
+    TEST_ASSERT_EQUAL_STRING("/X/broken.epub", bookPath.c_str());
     TEST_ASSERT_EQUAL_INT(1, paints.size());
     TEST_ASSERT_TRUE(paints.back().library);
     TEST_ASSERT_TRUE(paints.back().full);

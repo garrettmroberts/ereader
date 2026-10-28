@@ -52,36 +52,36 @@ extern "C" void tearDown(void) {}
 extern "C" void test_init_enables_pullups(void) {
     Input::init();
     TEST_ASSERT_EQUAL_INT(2, hostPinModes.size());
-    TEST_ASSERT_EQUAL_INT(Input::kPrevPin, hostPinModes[0].pin);
+    TEST_ASSERT_EQUAL_INT(kPrevPin, hostPinModes[0].pin);
     TEST_ASSERT_EQUAL_INT(INPUT_PULLUP, hostPinModes[0].mode);
-    TEST_ASSERT_EQUAL_INT(Input::kNextPin, hostPinModes[1].pin);
+    TEST_ASSERT_EQUAL_INT(kNextPin, hostPinModes[1].pin);
     TEST_ASSERT_EQUAL_INT(INPUT_PULLUP, hostPinModes[1].mode);
 }
 
 extern "C" void test_short_press_on_each_button(void) {
-    down(Input::kPrevPin);
-    const Input::Gesture prev = up(Input::kPrevPin);
+    down(kPrevPin);
+    const Input::Gesture prev = up(kPrevPin);
     TEST_ASSERT_TRUE(prev.prev == Input::Press::Short);
     TEST_ASSERT_TRUE(prev.next == Input::Press::None);
     TEST_ASSERT_FALSE(prev.bothLong);
 
-    down(Input::kNextPin);
-    const Input::Gesture next = up(Input::kNextPin);
+    down(kNextPin);
+    const Input::Gesture next = up(kNextPin);
     TEST_ASSERT_TRUE(next.prev == Input::Press::None);
     TEST_ASSERT_TRUE(next.next == Input::Press::Short);
     TEST_ASSERT_FALSE(next.bothLong);
 }
 
 extern "C" void test_bounce_does_not_count_as_a_press(void) {
-    edge(Input::kPrevPin, LOW);
+    edge(kPrevPin, LOW);
     hostMillis += 20;
-    edge(Input::kPrevPin, HIGH);
+    edge(kPrevPin, HIGH);
     const Input::Gesture settled = commit();
     TEST_ASSERT_TRUE(isNone(settled));
 }
 
 extern "C" void test_long_press_fires_at_the_threshold_and_does_not_repeat(void) {
-    down(Input::kPrevPin);
+    down(kPrevPin);
     hostMillis += Input::kLongPressMs - 1;
     TEST_ASSERT_TRUE(isNone(Input::read()));
 
@@ -94,13 +94,13 @@ extern "C" void test_long_press_fires_at_the_threshold_and_does_not_repeat(void)
     hostMillis += Input::kLongPressMs;
     TEST_ASSERT_TRUE(isNone(Input::read()));
 
-    const Input::Gesture released = up(Input::kPrevPin);
+    const Input::Gesture released = up(kPrevPin);
     TEST_ASSERT_TRUE(isNone(released));
 }
 
 extern "C" void test_both_long_press_suppresses_single_button_gestures(void) {
-    down(Input::kPrevPin);
-    down(Input::kNextPin);
+    down(kPrevPin);
+    down(kNextPin);
     hostMillis += Input::kLongPressMs;
 
     const Input::Gesture both = Input::read();
@@ -108,23 +108,23 @@ extern "C" void test_both_long_press_suppresses_single_button_gestures(void) {
     TEST_ASSERT_TRUE(both.next == Input::Press::None);
     TEST_ASSERT_TRUE(both.bothLong);
 
-    TEST_ASSERT_TRUE(isNone(up(Input::kPrevPin)));
-    TEST_ASSERT_TRUE(isNone(up(Input::kNextPin)));
+    TEST_ASSERT_TRUE(isNone(up(kPrevPin)));
+    TEST_ASSERT_TRUE(isNone(up(kNextPin)));
 }
 
 extern "C" void test_long_press_waits_while_the_other_button_is_held(void) {
-    down(Input::kPrevPin);
-    down(Input::kNextPin);
+    down(kPrevPin);
+    down(kNextPin);
     // The second press takes a debounce interval, so only the first button is due.
     hostMillis += Input::kLongPressMs - (Input::kDebounceMs + 2);
     TEST_ASSERT_TRUE(isNone(Input::read()));
 
     // Releasing the second button before its own long press is a short press.
-    const Input::Gesture gesture = up(Input::kNextPin);
+    const Input::Gesture gesture = up(kNextPin);
     TEST_ASSERT_TRUE(gesture.prev == Input::Press::Long);
     TEST_ASSERT_TRUE(gesture.next == Input::Press::Short);
     TEST_ASSERT_FALSE(gesture.bothLong);
-    TEST_ASSERT_TRUE(isNone(up(Input::kPrevPin)));
+    TEST_ASSERT_TRUE(isNone(up(kPrevPin)));
 }
 
 int main(int, char**) {

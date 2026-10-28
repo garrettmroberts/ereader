@@ -2,7 +2,6 @@
 #include "pins.h"
 
 #include <Arduino.h>
-#include <LittleFS.h>
 #include <SD.h>
 #include <SPI.h>
 
@@ -62,10 +61,7 @@ bool cardMounted() {
 }
 
 FS& bookFs() {
-    if (mounted) {
-        return SD;
-    }
-    return LittleFS;
+    return SD;
 }
 
 namespace {

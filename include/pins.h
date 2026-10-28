@@ -9,3 +9,6 @@ constexpr int kSpiSclk = 18;
 constexpr int kSpiMosi = 23;
 constexpr int kSpiMiso = 19;
 constexpr int kSdCs = 25;
+
+constexpr int kPrevPin = 32;
+constexpr int kNextPin = 33;

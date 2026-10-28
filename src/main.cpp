@@ -12,7 +12,7 @@
 #include <strings.h>
 #include <vector>
 
-String bookPath = "/walden.epub";
+String bookPath;
 String bookText;
 std::vector<size_t> pageStarts;
 size_t chapterIndex = 0;
@@ -48,16 +48,6 @@ bool endsWithEpub(const char* path) {
   return hasSuffix(path, length, ".epub") || hasSuffix(path, length, ".epu");
 }
 
-String absolutePath(const char* path) {
-  if (path == nullptr || path[0] == '\0') {
-    return String();
-  }
-  if (path[0] == '/') {
-    return String(path);
-  }
-  return "/" + String(path);
-}
-
 bool isHidden(const char* path) {
   if (path == nullptr || path[0] == '\0') {
     return true;
@@ -65,25 +55,6 @@ bool isHidden(const char* path) {
   const char* slash = strrchr(path, '/');
   const char* name = slash == nullptr ? path : slash + 1;
   return name[0] == '\0' || name[0] == '.';
-}
-
-void listInternalBooks() {
-  File root = LittleFS.open("/");
-  if (!root) {
-    return;
-  }
-  File entry = root.openNextFile();
-  while (entry) {
-    const char* path = entry.path();
-    const bool directory = entry.isDirectory();
-    const String full = absolutePath(path);
-    entry.close();
-    if (!directory && !isHidden(full.c_str()) && endsWithEpub(full.c_str())) {
-      books.push_back(full);
-    }
-    entry = root.openNextFile();
-  }
-  root.close();
 }
 
 String nestedPath(const char* parent, const char* name) {
@@ -156,11 +127,7 @@ void listCardBooks() {
 
 void listBooks() {
   books.clear();
-  if (cardMounted()) {
-    listCardBooks();
-  } else {
-    listInternalBooks();
-  }
+  listCardBooks();
   std::sort(books.begin(), books.end());
 }
 
@@ -325,7 +292,7 @@ void setup() {
 
   Input::init();
   initDisplay();
-  const bool card = mountCard();
+  mountCard();
 
   if (!LittleFS.begin()) {
     Serial.println("Failed to mount LittleFS");
@@ -333,26 +300,21 @@ void setup() {
   }
 
   loadPlaces();
-  size_t chapter = 0;
-  size_t page = 0;
-  savedPlace(bookPath, chapter, page);
-  if (card) {
-    listBooks();
-    selectCurrentBook();
-    const bool found = !books.empty() && books[bookPick] == bookPath;
-    if (found && openChapter(chapter, page, false)) {
+  listBooks();
+  selectCurrentBook();
+  const bool found = bookPath.length() > 0 && !books.empty() && books[bookPick] == bookPath;
+  if (found) {
+    size_t chapter = 0;
+    size_t page = 0;
+    savedPlace(bookPath, chapter, page);
+    if (openChapter(chapter, page, false)) {
       return;
     }
-    if (!found) {
-      bookPick = 0;
-    }
-    inLibrary = true;
-    showLibrary(true);
-    return;
+  } else {
+    bookPick = 0;
   }
-  if (!openChapter(chapter, page, false)) {
-    Serial.println("Failed to open epub");
-  }
+  inLibrary = true;
+  showLibrary(true);
 }
 
 void loop() {

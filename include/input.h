@@ -1,8 +1,6 @@
 #pragma once
 
 namespace Input {
-    constexpr int kPrevPin = 32;
-    constexpr int kNextPin = 33;
     constexpr unsigned long kDebounceMs = 50;
     constexpr unsigned long kLongPressMs = 500;
 

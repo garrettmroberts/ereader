@@ -8,8 +8,7 @@
 
 #include <vector>
 
-// Mounts the microSD reader when a card is present.
-// Books are then read from the card. Otherwise they are read from internal storage.
+// Mounts the microSD reader. Every book is read from the card.
 bool mountCard();
 bool cardMounted();
 FS& bookFs();

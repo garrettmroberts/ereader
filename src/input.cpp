@@ -1,10 +1,10 @@
 #include "input.h"
+#include "pins.h"
+
 #include <esp32-hal-gpio.h>
 #include <Arduino.h>
 
 namespace Input {
-    constexpr int BUTTON1_PIN = kPrevPin;
-    constexpr int BUTTON2_PIN = kNextPin;
     constexpr unsigned long DEBOUNCE_MS = kDebounceMs;
     constexpr unsigned long LONG_PRESS_MS = kLongPressMs;
 
@@ -18,12 +18,12 @@ namespace Input {
         Press pending = Press::None;
     };
 
-    Button prevButton{BUTTON1_PIN};
-    Button nextButton{BUTTON2_PIN};
+    Button prevButton{kPrevPin};
+    Button nextButton{kNextPin};
 
     void init() {
-        pinMode(BUTTON1_PIN, INPUT_PULLUP);
-        pinMode(BUTTON2_PIN, INPUT_PULLUP);
+        pinMode(kPrevPin, INPUT_PULLUP);
+        pinMode(kNextPin, INPUT_PULLUP);
     }
 
     void update(Button& button) {
@@ -98,8 +98,8 @@ namespace Input {
 
 #ifdef UNIT_TEST
     void resetForTest() {
-        prevButton = Button{BUTTON1_PIN};
-        nextButton = Button{BUTTON2_PIN};
+        prevButton = Button{kPrevPin};
+        nextButton = Button{kNextPin};
     }
 #endif
 }
