@@ -7,6 +7,12 @@
 #include <vector>
 
 #include "../../src/epub.cpp"
+
+FS& bookFs() {
+    return LittleFS;
+}
+
+void releaseDisplayBus() {}
 #include "../../host/miniz/miniz_tinfl.c"
 
 namespace {

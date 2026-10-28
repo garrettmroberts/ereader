@@ -135,12 +135,59 @@ Gesture read() {
 
 #define setup appSetup
 #define loop appLoop
+
+bool hostCardOn = false;
+
+bool mountCard() {
+    return hostCardOn;
+}
+
+bool cardMounted() {
+    return hostCardOn;
+}
+
+FS& bookFs() {
+    return hostCardOn ? CardFs : LittleFS;
+}
+
+void releaseDisplayBus() {}
+
+#include "card.h"
+
+bool readCardDirectory(const char* path, std::vector<CardEntry>& out) {
+    File dir = CardFs.open(path == nullptr ? "/" : path);
+    if (!dir || !dir.isDirectory()) {
+        if (dir) {
+            dir.close();
+        }
+        return false;
+    }
+    File entry = dir.openNextFile();
+    while (entry) {
+        CardEntry item;
+        item.directory = entry.isDirectory();
+        const char* raw = entry.path();
+        const char* slash = raw == nullptr ? nullptr : strrchr(raw, '/');
+        const char* name = raw == nullptr ? "" : (slash == nullptr ? raw : slash + 1);
+        item.name = String(name);
+        entry.close();
+        if (item.name.length() > 0 && item.name.c_str()[0] != '.') {
+            out.push_back(item);
+        }
+        entry = dir.openNextFile();
+    }
+    dir.close();
+    return true;
+}
+
 #include "../../src/main.cpp"
 #undef setup
 #undef loop
 
 extern "C" void setUp(void) {
     hostFs().reset();
+    hostCard().reset();
+    hostCardOn = false;
     Serial.out.clear();
     paints.clear();
     queued.clear();
@@ -162,6 +209,8 @@ extern "C" void test_filename_suffix(void) {
     TEST_ASSERT_TRUE(endsWithEpub("walden.epub"));
     TEST_ASSERT_TRUE(endsWithEpub("walden.EPUB"));
     TEST_ASSERT_TRUE(endsWithEpub(".epub"));
+    TEST_ASSERT_TRUE(endsWithEpub("BOOK1.EPU"));
+    TEST_ASSERT_TRUE(endsWithEpub("BOOK1~1.EPU"));
     TEST_ASSERT_FALSE(endsWithEpub("epub"));
     TEST_ASSERT_FALSE(endsWithEpub("notes.txt"));
     TEST_ASSERT_FALSE(endsWithEpub("walden.epub.bak"));
@@ -410,6 +459,109 @@ extern "C" void test_unreadable_book_returns_to_the_library(void) {
     TEST_ASSERT_TRUE(paints.back().full);
 }
 
+extern "C" void test_card_library_lists_author_folders_and_restores_the_place(void) {
+    catalog["/Austen/pride.epub"] = {{kChapter0, true}, {kChapter1, true}};
+    catalog["/Dickens/tale.epub"] = {{"other", true}};
+
+    HostRootEntry austen;
+    austen.path = "/Austen";
+    austen.directory = true;
+    austen.children.push_back({"pride.epub", false, {}});
+    austen.children.push_back({"/Austen/notes.txt", false, {}});
+    austen.children.push_back({"/Austen/series", true, {}});
+    HostRootEntry dickens;
+    dickens.path = "/Dickens";
+    dickens.directory = true;
+    dickens.children.push_back({"/Dickens/tale.epub", false, {}});
+    hostCard().root.push_back(austen);
+    hostCard().root.push_back(dickens);
+    hostCard().root.push_back({"/loose.epub", false, {}});
+    hostCard().root.push_back({"/readme.txt", false, {}});
+    hostCard().rootSet = true;
+    hostCardOn = true;
+    bookPath = "/Austen/pride.epub";
+
+    appSetup();
+    TEST_ASSERT_FALSE(inLibrary);
+    TEST_ASSERT_EQUAL_STRING("/Austen/pride.epub", bookPath.c_str());
+    TEST_ASSERT_EQUAL_INT(0, pageIndex);
+
+    tap(gesture(Input::Press::None, Input::Press::Short));
+    TEST_ASSERT_EQUAL_INT(1, pageIndex);
+
+    tap(gesture(Input::Press::None, Input::Press::None, true));
+    TEST_ASSERT_TRUE(inLibrary);
+    TEST_ASSERT_EQUAL_INT(2, books.size());
+    TEST_ASSERT_EQUAL_STRING("/Austen/pride.epub", books[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("/Dickens/tale.epub", books[1].c_str());
+    TEST_ASSERT_EQUAL_INT(0, bookPick);
+    TEST_ASSERT_TRUE(positionsFile().find("/Austen/pride.epub\t0\t1\n") != std::string::npos);
+
+    tap(gesture(Input::Press::None, Input::Press::Short));
+    TEST_ASSERT_EQUAL_STRING("/Dickens/tale.epub", paints.back().text.c_str());
+    tap(gesture(Input::Press::None, Input::Press::Long));
+    TEST_ASSERT_FALSE(inLibrary);
+    TEST_ASSERT_EQUAL_STRING("/Dickens/tale.epub", bookPath.c_str());
+    TEST_ASSERT_EQUAL_INT(0, pageIndex);
+
+    tap(gesture(Input::Press::None, Input::Press::None, true));
+    TEST_ASSERT_TRUE(positionsFile().find("/Dickens/tale.epub\t0\t0\n") != std::string::npos);
+    TEST_ASSERT_TRUE(positionsFile().find("/Austen/pride.epub\t0\t1\n") != std::string::npos);
+
+    tap(gesture(Input::Press::Short, Input::Press::None));
+    tap(gesture(Input::Press::None, Input::Press::Long));
+    TEST_ASSERT_EQUAL_STRING("/Austen/pride.epub", bookPath.c_str());
+    TEST_ASSERT_EQUAL_INT(1, pageIndex);
+    TEST_ASSERT_FALSE(paints.back().library);
+}
+
+extern "C" void test_card_library_finds_epubs_inside_title_folders(void) {
+    catalog["/Austen/Pride/pride.epub"] = {{"pride", true}};
+    catalog["/Austen/emma.epub"] = {{"emma", true}};
+
+    HostRootEntry pride;
+    pride.path = "/Austen/Pride";
+    pride.directory = true;
+    pride.children.push_back({"/Austen/Pride/pride.epub", false, {}});
+    pride.children.push_back({"/Austen/Pride/cover.jpg", false, {}});
+    HostRootEntry austen;
+    austen.path = "/Austen";
+    austen.directory = true;
+    austen.children.push_back(pride);
+    austen.children.push_back({"/Austen/emma.epub", false, {}});
+    hostCard().root.push_back(austen);
+    hostCard().rootSet = true;
+    hostCardOn = true;
+    bookPath = "/Austen/Pride/pride.epub";
+
+    appSetup();
+    TEST_ASSERT_FALSE(inLibrary);
+    TEST_ASSERT_EQUAL_STRING("/Austen/Pride/pride.epub", bookPath.c_str());
+
+    tap(gesture(Input::Press::None, Input::Press::None, true));
+    TEST_ASSERT_EQUAL_INT(2, books.size());
+    TEST_ASSERT_EQUAL_STRING("/Austen/Pride/pride.epub", books[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("/Austen/emma.epub", books[1].c_str());
+}
+
+extern "C" void test_missing_card_book_opens_the_library_without_forgetting_a_place(void) {
+    hostFs().files["/positions.txt"] = "/walden.epub\t2\t1\n";
+    HostRootEntry austen;
+    austen.path = "/Austen";
+    austen.directory = true;
+    austen.children.push_back({"pride.epub", false, {}});
+    hostCard().root.push_back(austen);
+    hostCard().rootSet = true;
+    hostCardOn = true;
+    catalog["/Austen/pride.epub"] = {{"other", true}};
+
+    appSetup();
+    TEST_ASSERT_TRUE(inLibrary);
+    TEST_ASSERT_EQUAL_INT(1, books.size());
+    TEST_ASSERT_EQUAL_STRING("/Austen/pride.epub", books[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("/walden.epub\t2\t1\n", positionsFile().c_str());
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_filename_suffix);
@@ -426,5 +578,8 @@ int main(int, char**) {
     RUN_TEST(test_library_navigation_is_partial_and_opens_the_saved_place);
     RUN_TEST(test_single_book_library_only_opens_on_long_next);
     RUN_TEST(test_unreadable_book_returns_to_the_library);
+    RUN_TEST(test_card_library_lists_author_folders_and_restores_the_place);
+    RUN_TEST(test_card_library_finds_epubs_inside_title_folders);
+    RUN_TEST(test_missing_card_book_opens_the_library_without_forgetting_a_place);
     return UNITY_END();
 }

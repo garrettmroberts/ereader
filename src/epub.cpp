@@ -5,6 +5,8 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 
+#include "card.h"
+
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +16,11 @@
 namespace {
 
 constexpr uint32_t kLocalHeader = 0x04034b50;
+
+File openBook(const char* path) {
+    releaseDisplayBus();
+    return bookFs().open(path, "r");
+}
 
 bool readExact(File& file, uint8_t* dst, size_t length) {
     size_t got = 0;
@@ -704,7 +711,7 @@ bool ensureIndex(const char* path) {
     indexed = false;
     indexedPath = path;
 
-    File file = LittleFS.open(path, "r");
+    File file = openBook(path);
     if (!file) {
         Serial.println("Failed to open epub.");
         indexedPath = "";
@@ -861,7 +868,7 @@ bool findCoverHref(const char* xml, char* href, size_t hrefLen) {
 }
 
 bool findCover(const char* path, EpubCover& cover) {
-    File file = LittleFS.open(path, "r");
+    File file = openBook(path);
     if (!file) {
         return false;
     }
@@ -917,7 +924,7 @@ bool findCover(const char* path, EpubCover& cover) {
 }
 
 bool extractCover(const char* epubPath, const EpubCover& cover, const char* destPath) {
-    File epub = LittleFS.open(epubPath, "r");
+    File epub = openBook(epubPath);
     if (!epub) {
         return false;
     }
@@ -955,7 +962,7 @@ bool loadEpubChapter(const char* path, size_t index, String& text) {
     }
 
     const Chapter& chapter = chapters[index];
-    File file = LittleFS.open(path, "r");
+    File file = openBook(path);
     if (!file) {
         Serial.println("Failed to open epub.");
         return false;

@@ -10,19 +10,14 @@
 #include <LittleFS.h>
 #include <SPI.h>
 
+#include "card.h"
+#include "pins.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-// Display control pins
-#define EPD_CS   27
-#define EPD_DC   26
-#define EPD_RST  25
-#define EPD_BUSY 13
-
-// SPI pins
-#define EPD_SCLK 14
-#define EPD_MOSI 12
+#include <strings.h>
+#include <vector>
 
 // GDEM0213B74: 128 x 250, SSD1680
 #define MAX_DISPLAY_BUFFER_SIZE 8000
@@ -33,7 +28,7 @@
 
 GxEPD2_BW<GxEPD2_213_B74,
           MAX_HEIGHT(GxEPD2_213_B74)> display(
-  GxEPD2_213_B74(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY)
+  GxEPD2_213_B74(kEpdCs, kEpdDc, kEpdRst, kEpdBusy)
 );
 
 namespace {
@@ -79,9 +74,13 @@ bool beginRefresh(bool forceFull) {
 }  // namespace
 
 void initDisplay() {
-    SPI.begin(EPD_SCLK, -1, EPD_MOSI, EPD_CS);
+    // MISO stays attached so the microSD reader can share this bus.
+    pinMode(kSdCs, OUTPUT);
+    digitalWrite(kSdCs, HIGH);
+    SPI.begin(kSpiSclk, kSpiMiso, kSpiMosi, kEpdCs);
     display.init(115200);
     display.setRotation(0);
+    digitalWrite(kEpdCs, HIGH);
 }
 
 std::vector<size_t> paginate(const String& text) {
@@ -177,7 +176,7 @@ extern "C" unsigned int jpegWrite(JDEC* jd, void* bitmap, JRECT* rect) {
 
 namespace {
 
-bool decodeJpeg(const char* path, uint32_t offset, uint32_t length, int maxW, int maxH, int& outW, int& outH, uint8_t*& bits) {
+bool decodeJpeg(const char* path, uint32_t offset, uint32_t length, int maxW, int maxH, int& outW, int& outH, uint8_t*& bits, bool internal) {
     bits = nullptr;
     outW = 0;
     outH = 0;
@@ -185,7 +184,10 @@ bool decodeJpeg(const char* path, uint32_t offset, uint32_t length, int maxW, in
         return false;
     }
 
-    File file = LittleFS.open(path, "r");
+    if (!internal) {
+        releaseDisplayBus();
+    }
+    File file = (internal ? LittleFS : bookFs()).open(path, "r");
     if (!file) {
         return false;
     }
@@ -246,9 +248,102 @@ bool decodeJpeg(const char* path, uint32_t offset, uint32_t length, int maxW, in
     return true;
 }
 
+struct CachedCover {
+    String path;
+    int width = 0;
+    int height = 0;
+    uint8_t* bits = nullptr;
+};
+
+std::vector<CachedCover> covers;
+
+bool findCached(const char* path, int& outW, int& outH, uint8_t*& bits) {
+    if (path == nullptr) {
+        return false;
+    }
+    for (const CachedCover& cover : covers) {
+        if (cover.path == path && cover.bits != nullptr) {
+            outW = cover.width;
+            outH = cover.height;
+            bits = cover.bits;
+            return true;
+        }
+    }
+    return false;
+}
+
+void storeCover(const char* path, int width, int height, uint8_t* bits) {
+    if (path == nullptr || bits == nullptr) {
+        free(bits);
+        return;
+    }
+    if (covers.size() >= 8) {
+        free(covers.front().bits);
+        covers.erase(covers.begin());
+    }
+    covers.push_back(CachedCover{String(path), width, height, bits});
+}
+
+bool replaceExtension(const char* path, const char* extension, char* out, size_t outSize) {
+    const char* slash = strrchr(path, '/');
+    const char* name = slash == nullptr ? path : slash + 1;
+    const char* dot = strrchr(name, '.');
+    if (dot == nullptr || dot == name) {
+        return false;
+    }
+    const size_t stem = static_cast<size_t>(dot - path);
+    const size_t extLen = strlen(extension);
+    if (stem + extLen + 1 > outSize) {
+        return false;
+    }
+    memcpy(out, path, stem);
+    memcpy(out + stem, extension, extLen + 1);
+    return true;
+}
+
+bool fileSize(const char* path, uint32_t& size) {
+    releaseDisplayBus();
+    File file = bookFs().open(path, "r");
+    if (!file || file.isDirectory()) {
+        if (file) {
+            file.close();
+        }
+        return false;
+    }
+    size = file.size();
+    file.close();
+    return size >= 4;
+}
+
 bool loadCover(const char* epubPath, int maxW, int maxH, int& outW, int& outH, uint8_t*& bits) {
+    if (epubPath == nullptr) {
+        return false;
+    }
+    if (findCached(epubPath, outW, outH, bits)) {
+        Serial.println("Cover cached");
+        return true;
+    }
+
+    const uint32_t started = millis();
+    char sibling[768];
+    const char* extensions[] = {".jpg", ".jpeg"};
+    for (const char* extension : extensions) {
+        uint32_t size = 0;
+        if (replaceExtension(epubPath, extension, sibling, sizeof(sibling)) && fileSize(sibling, size) &&
+            decodeJpeg(sibling, 0, size, maxW, maxH, outW, outH, bits, false)) {
+            storeCover(epubPath, outW, outH, bits);
+            Serial.print("Cover jpg ");
+            Serial.print(millis() - started);
+            Serial.println(" ms");
+            return true;
+        }
+    }
+
     EpubCover cover;
     if (!epubFindCover(epubPath, cover)) {
+        Serial.print("Cover missing ");
+        Serial.print(millis() - started);
+        Serial.println(" ms");
         return false;
     }
 
@@ -272,19 +367,50 @@ bool loadCover(const char* epubPath, int maxW, int maxH, int& outW, int& outH, u
         temporary = true;
     }
 
-    const bool ok = decodeJpeg(imagePath, offset, length, maxW, maxH, outW, outH, bits);
+    const bool ok = decodeJpeg(imagePath, offset, length, maxW, maxH, outW, outH, bits, temporary);
     if (temporary) {
         LittleFS.remove(imagePath);
     }
+    if (ok) {
+        storeCover(epubPath, outW, outH, bits);
+    }
+    Serial.print("Cover epub ");
+    Serial.print(millis() - started);
+    Serial.println(" ms");
     return ok;
 }
 
-const char* fileName(const char* path) {
-    if (path == nullptr) {
-        return "";
+void bookCaption(const char* path, char* author, size_t authorSize, char* title, size_t titleSize) {
+    author[0] = '\0';
+    title[0] = '\0';
+    if (path == nullptr || path[0] == '\0' || authorSize == 0 || titleSize == 0) {
+        return;
     }
-    const char* slash = strrchr(path, '/');
-    return slash == nullptr ? path : slash + 1;
+
+    const char* start = path;
+    while (*start == '/') {
+        start++;
+    }
+    const char* slash = strchr(start, '/');
+    if (slash != nullptr) {
+        size_t length = static_cast<size_t>(slash - start);
+        if (length >= authorSize) {
+            length = authorSize - 1;
+        }
+        memcpy(author, start, length);
+        author[length] = '\0';
+    }
+
+    const char* last = strrchr(path, '/');
+    const char* file = last == nullptr ? path : last + 1;
+    strncpy(title, file, titleSize - 1);
+    title[titleSize - 1] = '\0';
+    const size_t length = strlen(title);
+    if (length >= 5 && strcasecmp(title + length - 5, ".epub") == 0) {
+        title[length - 5] = '\0';
+    } else if (length >= 4 && strcasecmp(title + length - 4, ".epu") == 0) {
+        title[length - 4] = '\0';
+    }
 }
 
 int paintText(const char* text, int x, int y, int maxCols, int maxLines) {
@@ -328,7 +454,10 @@ void paintCover(int x0, int y0, const uint8_t* bits, int width, int height) {
 }  // namespace
 
 void drawLibrary(const char* epubPath, size_t index, size_t count, bool fullRefresh) {
-    const char* title = count == 0 ? "No books" : fileName(epubPath);
+    char author[64];
+    char book[64];
+    bookCaption(count == 0 ? nullptr : epubPath, author, sizeof(author), book, sizeof(book));
+    const char* title = count == 0 || book[0] == '\0' ? "No books" : book;
     const int cols = charsPerLine();
     const int titleBottom = 4 + 2 * kLineH;
     const int footerTop = display.height() - kMarginY - kLineH;
@@ -351,11 +480,23 @@ void drawLibrary(const char* epubPath, size_t index, size_t count, bool fullRefr
     display.setTextSize(kTextSize);
     display.setTextWrap(false);
 
-    beginRefresh(fullRefresh);
+    // Library moves stay partial. A full refresh here is a multi-second flash.
+    if (fullRefresh) {
+        beginRefresh(true);
+    } else {
+        display.setPartialWindow(0, 0, display.width(), display.height());
+        Serial.println("Paint: partial");
+    }
+    const uint32_t painted = millis();
     display.firstPage();
     do {
         display.fillScreen(GxEPD_WHITE);
-        paintText(title, kMarginX, 4, cols > 0 ? cols : 1, 2);
+        if (author[0] == '\0') {
+            paintText(title, kMarginX, 4, cols > 0 ? cols : 1, 2);
+        } else {
+            paintText(author, kMarginX, 4, cols > 0 ? cols : 1, 1);
+            paintText(title, kMarginX, 4 + kLineH, cols > 0 ? cols : 1, 1);
+        }
         if (haveCover && bits != nullptr) {
             const int x = (display.width() - imageW) / 2;
             const int y = titleBottom + (maxH - imageH) / 2;
@@ -368,13 +509,21 @@ void drawLibrary(const char* epubPath, size_t index, size_t count, bool fullRefr
         }
     } while (display.nextPage());
 
-    display.powerOff();
-    free(bits);
+    if (fullRefresh) {
+        display.powerOff();
+    }
 
+    Serial.print("Paint ");
+    Serial.print(millis() - painted);
+    Serial.println(" ms");
     Serial.print("Library ");
     Serial.print(index + 1);
     Serial.print("/");
     Serial.print(count);
     Serial.print(" ");
+    if (author[0] != '\0') {
+        Serial.print(author);
+        Serial.print(" / ");
+    }
     Serial.println(title);
 }

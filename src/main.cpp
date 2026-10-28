@@ -1,11 +1,14 @@
-#include "display.h"
-#include "epub.h"
-#include "input.h"
 #include <Arduino.h>
 #include <LittleFS.h>
 
+#include "card.h"
+#include "display.h"
+#include "epub.h"
+#include "input.h"
+
 #include <algorithm>
 #include <cstring>
+#include <stdio.h>
 #include <strings.h>
 #include <vector>
 
@@ -27,9 +30,148 @@ struct Place {
 
 std::vector<Place> places;
 
+bool hasSuffix(const char* path, size_t length, const char* suffix) {
+  const size_t n = strlen(suffix);
+  return length >= n && strcasecmp(path + length - n, suffix) == 0;
+}
+
 bool endsWithEpub(const char* path) {
-  const size_t length = strlen(path);
-  return length >= 5 && strcasecmp(path + length - 5, ".epub") == 0;
+  if (path == nullptr) {
+    return false;
+  }
+  size_t length = strlen(path);
+  while (length > 0 && (path[length - 1] == ' ' || path[length - 1] == '\r' || path[length - 1] == '\n' ||
+                         path[length - 1] == '\t')) {
+    --length;
+  }
+  // A card written without long names stores book1.epub as BOOK1.EPU.
+  return hasSuffix(path, length, ".epub") || hasSuffix(path, length, ".epu");
+}
+
+String absolutePath(const char* path) {
+  if (path == nullptr || path[0] == '\0') {
+    return String();
+  }
+  if (path[0] == '/') {
+    return String(path);
+  }
+  return "/" + String(path);
+}
+
+bool isHidden(const char* path) {
+  if (path == nullptr || path[0] == '\0') {
+    return true;
+  }
+  const char* slash = strrchr(path, '/');
+  const char* name = slash == nullptr ? path : slash + 1;
+  return name[0] == '\0' || name[0] == '.';
+}
+
+void listInternalBooks() {
+  File root = LittleFS.open("/");
+  if (!root) {
+    return;
+  }
+  File entry = root.openNextFile();
+  while (entry) {
+    const char* path = entry.path();
+    const bool directory = entry.isDirectory();
+    const String full = absolutePath(path);
+    entry.close();
+    if (!directory && !isHidden(full.c_str()) && endsWithEpub(full.c_str())) {
+      books.push_back(full);
+    }
+    entry = root.openNextFile();
+  }
+  root.close();
+}
+
+String nestedPath(const char* parent, const char* name) {
+  char combined[512];
+  if (parent == nullptr || parent[0] == '\0' || (parent[0] == '/' && parent[1] == '\0')) {
+    snprintf(combined, sizeof(combined), "/%s", name == nullptr ? "" : name);
+  } else {
+    snprintf(combined, sizeof(combined), "%s/%s", parent, name == nullptr ? "" : name);
+  }
+  return String(combined);
+}
+
+void listCardBooks() {
+  std::vector<CardEntry> authors;
+  if (!readCardDirectory("/", authors)) {
+    Serial.println("SD root did not open");
+    return;
+  }
+
+  for (const CardEntry& author : authors) {
+    if (!author.directory || isHidden(author.name.c_str())) {
+      continue;
+    }
+    const String authorPath = nestedPath("/", author.name.c_str());
+    std::vector<CardEntry> titles;
+    if (!readCardDirectory(authorPath.c_str(), titles)) {
+      continue;
+    }
+
+    Serial.print("Author ");
+    Serial.println(authorPath);
+    for (const CardEntry& title : titles) {
+      if (isHidden(title.name.c_str())) {
+        continue;
+      }
+      const String titlePath = nestedPath(authorPath.c_str(), title.name.c_str());
+      if (!title.directory) {
+        if (endsWithEpub(title.name.c_str())) {
+          books.push_back(titlePath);
+          Serial.print("Book ");
+          Serial.println(titlePath);
+        } else {
+          Serial.print(" skip ");
+          Serial.println(title.name);
+        }
+        continue;
+      }
+
+      // Calibre-style cards store each book as Author/Title/Title.epub.
+      std::vector<CardEntry> nested;
+      if (!readCardDirectory(titlePath.c_str(), nested)) {
+        continue;
+      }
+      for (const CardEntry& file : nested) {
+        if (file.directory || isHidden(file.name.c_str()) || !endsWithEpub(file.name.c_str())) {
+          if (!file.directory && !isHidden(file.name.c_str())) {
+            Serial.print(" skip ");
+            Serial.println(file.name);
+          }
+          continue;
+        }
+        const String full = nestedPath(titlePath.c_str(), file.name.c_str());
+        books.push_back(full);
+        Serial.print("Book ");
+        Serial.println(full);
+      }
+    }
+  }
+}
+
+void listBooks() {
+  books.clear();
+  if (cardMounted()) {
+    listCardBooks();
+  } else {
+    listInternalBooks();
+  }
+  std::sort(books.begin(), books.end());
+}
+
+void selectCurrentBook() {
+  bookPick = 0;
+  for (size_t i = 0; i < books.size(); ++i) {
+    if (books[i] == bookPath) {
+      bookPick = i;
+      return;
+    }
+  }
 }
 
 void loadPlaces() {
@@ -156,34 +298,8 @@ void enterLibrary() {
   remember();
   bookText = "";
   pageStarts.clear();
-  books.clear();
-
-  File root = LittleFS.open("/");
-  if (root) {
-    File entry = root.openNextFile();
-    while (entry) {
-      const char* path = entry.path();
-      if (path != nullptr && !entry.isDirectory() && endsWithEpub(path)) {
-        String full = path;
-        if (!full.startsWith("/")) {
-          full = "/" + full;
-        }
-        books.push_back(full);
-      }
-      entry = root.openNextFile();
-    }
-    root.close();
-  }
-
-  std::sort(books.begin(), books.end());
-  bookPick = 0;
-  for (size_t i = 0; i < books.size(); ++i) {
-    if (books[i] == bookPath) {
-      bookPick = i;
-      break;
-    }
-  }
-
+  listBooks();
+  selectCurrentBook();
   inLibrary = true;
   showLibrary(true);
 }
@@ -209,6 +325,7 @@ void setup() {
 
   Input::init();
   initDisplay();
+  const bool card = mountCard();
 
   if (!LittleFS.begin()) {
     Serial.println("Failed to mount LittleFS");
@@ -219,6 +336,20 @@ void setup() {
   size_t chapter = 0;
   size_t page = 0;
   savedPlace(bookPath, chapter, page);
+  if (card) {
+    listBooks();
+    selectCurrentBook();
+    const bool found = !books.empty() && books[bookPick] == bookPath;
+    if (found && openChapter(chapter, page, false)) {
+      return;
+    }
+    if (!found) {
+      bookPick = 0;
+    }
+    inLibrary = true;
+    showLibrary(true);
+    return;
+  }
   if (!openChapter(chapter, page, false)) {
     Serial.println("Failed to open epub");
   }

@@ -12,6 +12,7 @@ enum SeekMode { SeekSet = 0, SeekCur = 1, SeekEnd = 2 };
 struct HostRootEntry {
     std::string path;
     bool directory = false;
+    std::vector<HostRootEntry> children;
 };
 
 struct HostFs {
@@ -180,12 +181,12 @@ public:
         return file;
     }
 
-    static File directory(const std::vector<HostRootEntry>& children) {
+    static File directory(const std::vector<HostRootEntry>& children, const std::string& path) {
         File file;
         file.state_ = std::make_shared<State>();
         file.state_->open = true;
         file.state_->directory = true;
-        file.state_->path = "/";
+        file.state_->path = path;
         file.state_->children = children;
         return file;
     }
@@ -211,12 +212,19 @@ private:
     std::shared_ptr<State> state_;
 };
 
+inline HostFs& hostCard() {
+    static HostFs fs;
+    return fs;
+}
+
 class FS {
 public:
-    bool begin() { return hostFs().mounted; }
+    explicit FS(HostFs* host) : host_(host) {}
+
+    bool begin() { return host_->mounted; }
 
     File open(const char* path, const char* mode = "r") {
-        if (!hostFs().mounted || path == nullptr) {
+        if (!host_->mounted || path == nullptr) {
             return File();
         }
         const bool write = mode != nullptr && mode[0] == 'w';
@@ -224,21 +232,26 @@ public:
             if (write) {
                 return File();
             }
-            std::vector<HostRootEntry> children = hostFs().root;
-            if (!hostFs().rootSet) {
+            std::vector<HostRootEntry> children = host_->root;
+            if (!host_->rootSet) {
                 children.clear();
-                for (const auto& item : hostFs().files) {
+                for (const auto& item : host_->files) {
                     children.push_back(HostRootEntry{item.first, false});
                 }
             }
-            return File::directory(children);
+            return File::directory(children, "/");
+        }
+        if (const HostRootEntry* found = findEntry(host_->root, path)) {
+            if (found->directory && !write) {
+                return File::directory(found->children, found->path);
+            }
         }
         if (write) {
-            hostFs().files[path] = "";
+            host_->files[path] = "";
             return File::writable(path);
         }
-        const auto found = hostFs().files.find(path);
-        if (found == hostFs().files.end()) {
+        const auto found = host_->files.find(path);
+        if (found == host_->files.end()) {
             return File();
         }
         return File::readable(path, found->second);
@@ -248,8 +261,26 @@ public:
         if (path == nullptr) {
             return false;
         }
-        return hostFs().files.erase(path) > 0;
+        return host_->files.erase(path) > 0;
     }
+
+private:
+    static const HostRootEntry* findEntry(const std::vector<HostRootEntry>& entries, const std::string& path) {
+        for (const HostRootEntry& entry : entries) {
+            if (entry.path == path) {
+                return &entry;
+            }
+            if (entry.directory) {
+                if (const HostRootEntry* nested = findEntry(entry.children, path)) {
+                    return nested;
+                }
+            }
+        }
+        return nullptr;
+    }
+
+    HostFs* host_;
 };
 
-inline FS LittleFS;
+inline FS LittleFS(&hostFs());
+inline FS CardFs(&hostCard());
