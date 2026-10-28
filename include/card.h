@@ -24,3 +24,8 @@ struct CardEntry {
 // Child names of a card directory. `path` is "/" or "/Author".
 // Names are collected before any book file is opened.
 bool readCardDirectory(const char* path, std::vector<CardEntry>& out);
+
+#ifdef UNIT_TEST
+// Host tests point listing at a temporary directory. The device root stays "/sd".
+void cardSetRootForTest(const char* root);
+#endif

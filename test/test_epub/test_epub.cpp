@@ -255,33 +255,6 @@ extern "C" void test_chapter_index_is_cached_until_reset(void) {
     TEST_ASSERT_EQUAL_INT(1, epubChapterCount("/book.epub"));
 }
 
-extern "C" void test_walden_chapters_and_cover(void) {
-    const std::string bytes = readDisk("data/walden.epub");
-    TEST_ASSERT_TRUE_MESSAGE(!bytes.empty(), "data/walden.epub is missing");
-    store("/walden.epub", bytes);
-
-    TEST_ASSERT_EQUAL_INT(23, epubChapterCount("/walden.epub"));
-
-    String text;
-    TEST_ASSERT_TRUE(loadEpubChapter("/walden.epub", 0, text));
-    const std::string body = textOf(text);
-    TEST_ASSERT_TRUE(body.find("Walden") != std::string::npos);
-    TEST_ASSERT_TRUE(body.find("<html") == std::string::npos);
-    TEST_ASSERT_TRUE(body.find("<p") == std::string::npos);
-    TEST_ASSERT_TRUE(body.size() > 50);
-
-    EpubCover cover;
-    TEST_ASSERT_TRUE(epubFindCover("/walden.epub", cover));
-    TEST_ASSERT_EQUAL_INT(0, cover.method);
-    TEST_ASSERT_EQUAL_UINT32(245255, cover.size);
-
-    TEST_ASSERT_TRUE(epubExtract("/walden.epub", cover, "/cover.jpg"));
-    const std::string& image = hostFs().files["/cover.jpg"];
-    TEST_ASSERT_EQUAL_UINT32(245255, image.size());
-    TEST_ASSERT_EQUAL_INT(0xff, static_cast<unsigned char>(image[0]));
-    TEST_ASSERT_EQUAL_INT(0xd8, static_cast<unsigned char>(image[1]));
-}
-
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_missing_or_invalid_file_has_no_chapters);

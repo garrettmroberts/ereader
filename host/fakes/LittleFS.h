@@ -59,7 +59,8 @@ public:
         }
         memcpy(&state_->bytes[state_->pos], src, length);
         state_->pos += length;
-        hostFs().files[state_->path] = state_->bytes;
+        HostFs& owner = state_->owner == nullptr ? hostFs() : *state_->owner;
+        owner.files[state_->path] = state_->bytes;
         return length;
     }
 
@@ -90,6 +91,13 @@ public:
             return static_cast<size_t>(-1);
         }
         return state_->pos;
+    }
+
+    size_t size() const {
+        if (!*this) {
+            return 0;
+        }
+        return state_->bytes.size();
     }
 
     int available() const {
@@ -172,11 +180,12 @@ public:
         return file;
     }
 
-    static File writable(const std::string& path) {
+    static File writable(HostFs* owner, const std::string& path) {
         File file;
         file.state_ = std::make_shared<State>();
         file.state_->open = true;
         file.state_->writable = true;
+        file.state_->owner = owner;
         file.state_->path = path;
         return file;
     }
@@ -196,6 +205,7 @@ private:
         bool open = false;
         bool writable = false;
         bool directory = false;
+        HostFs* owner = nullptr;
         std::string path;
         std::string bytes;
         size_t pos = 0;
@@ -248,7 +258,7 @@ public:
         }
         if (write) {
             host_->files[path] = "";
-            return File::writable(path);
+            return File::writable(host_, path);
         }
         const auto found = host_->files.find(path);
         if (found == host_->files.end()) {

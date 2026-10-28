@@ -41,7 +41,15 @@ inline unsigned long millis() {
     return hostMillis;
 }
 
-inline void delay(unsigned long) {}
+inline int hostDelayCalls = 0;
+
+inline void delay(unsigned long) {
+    hostDelayCalls++;
+}
+
+inline void digitalWrite(int pin, int level) {
+    hostSetPin(pin, level);
+}
 
 inline int digitalRead(int pin) {
     if (pin < 0 || pin >= static_cast<int>(sizeof(hostPins) / sizeof(hostPins[0]))) {
@@ -62,6 +70,7 @@ public:
 
     const char* c_str() const { return data_.c_str(); }
     size_t length() const { return data_.size(); }
+    char operator[](size_t index) const { return index < data_.size() ? data_[index] : '\0'; }
     void reserve(size_t bytes) { data_.reserve(bytes); }
     void concat(char c) { data_.push_back(c); }
 

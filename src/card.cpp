@@ -22,6 +22,8 @@ namespace {
 
 bool mounted = false;
 
+constexpr uint32_t kSdSpiHz = 15000000;
+
 void idleSelect() {
     pinMode(kEpdCs, OUTPUT);
     digitalWrite(kEpdCs, HIGH);
@@ -45,7 +47,7 @@ bool mountCard() {
         if (attempt > 0) {
             delay(200);
         }
-        if (SD.begin(kSdCs, SPI, 4000000, "/sd", 10)) {
+        if (SD.begin(kSdCs, SPI, kSdSpiHz, "/sd", 10)) {
             mounted = true;
             Serial.println("microSD mounted");
             return true;
@@ -66,12 +68,30 @@ FS& bookFs() {
 
 namespace {
 
+#ifdef UNIT_TEST
+const char* cardVfsRoot = "/sd";
+#else
+constexpr const char* cardVfsRoot = "/sd";
+#endif
+
 void cardVfsPath(const char* path, char* vfs, size_t size) {
-    if (path == nullptr || path[0] == '\0' || (path[0] == '/' && path[1] == '\0')) {
-        snprintf(vfs, size, "/sd");
-        return;
+    const bool root = path == nullptr || path[0] == '\0' || (path[0] == '/' && path[1] == '\0');
+    snprintf(vfs, size, "%s%s", cardVfsRoot, root ? "" : path);
+}
+
+bool joinChild(const char* parent, const char* name, char* out, size_t size) {
+    if (parent == nullptr || name == nullptr || size == 0) {
+        return false;
     }
-    snprintf(vfs, size, "/sd%s", path);
+    const size_t parentLen = strlen(parent);
+    const size_t nameLen = strlen(name);
+    if (parentLen + 1 + nameLen + 1 > size) {
+        return false;
+    }
+    memcpy(out, parent, parentLen);
+    out[parentLen] = '/';
+    memcpy(out + parentLen + 1, name, nameLen + 1);
+    return true;
 }
 
 }  // namespace
@@ -113,10 +133,9 @@ bool readCardDirectory(const char* path, std::vector<CardEntry>& out) {
         item.name = names[i];
         item.directory = types[i] == DT_DIR;
         if (types[i] != DT_DIR && types[i] != DT_REG) {
-            char child[768];
-            snprintf(child, sizeof(child), "%s/%s", vfs, names[i].c_str());
+            char child[1024];
             struct stat info;
-            if (stat(child, &info) == 0) {
+            if (joinChild(vfs, names[i].c_str(), child, sizeof(child)) && stat(child, &info) == 0) {
                 item.directory = S_ISDIR(info.st_mode);
             }
         }
@@ -124,3 +143,9 @@ bool readCardDirectory(const char* path, std::vector<CardEntry>& out) {
     }
     return true;
 }
+
+#ifdef UNIT_TEST
+void cardSetRootForTest(const char* root) {
+    cardVfsRoot = (root == nullptr || root[0] == '\0') ? "/sd" : root;
+}
+#endif
