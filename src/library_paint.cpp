@@ -380,7 +380,7 @@ void LibraryPage::paint(bool fullRefresh) {
     }
 
     display.setTextColor(GxEPD_BLACK);
-    display.setTextSize(kTextSize);
+    display.setTextSize(kFontSize);
     display.setTextWrap(false);
 
     // Library moves stay partial. A full refresh here is a multi-second flash.

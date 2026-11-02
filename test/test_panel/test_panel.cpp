@@ -152,8 +152,8 @@ extern "C" void test_panel_geometry_and_bus_init(void) {
     }
     TEST_ASSERT_TRUE(armedSd);
 
-    TEST_ASSERT_EQUAL_INT(19, charsPerLine());
-    TEST_ASSERT_EQUAL_INT(28, linesPerPage());
+    TEST_ASSERT_EQUAL_INT((display.width() - kMarginX * 2) / kCharW, charsPerLine());
+    TEST_ASSERT_EQUAL_INT((display.height() - kMarginY * 2) / kLineH, linesPerPage());
     const std::vector<size_t> pages = paginate(String("hello"));
     TEST_ASSERT_EQUAL_INT(1, pages.size());
     TEST_ASSERT_EQUAL_INT(0, pages[0]);

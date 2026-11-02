@@ -40,6 +40,7 @@ struct HostPanel {
     bool fullWindow = false;
     bool partialWindow = false;
     bool poweredOff = false;
+    int textSize = 1;
     int fillCount = 0;
     uint16_t fillColor = 0;
     unsigned long initBaud = 0;
@@ -80,7 +81,7 @@ public:
     }
 
     void setTextColor(uint16_t) {}
-    void setTextSize(int) {}
+    void setTextSize(int size) { hostPanel.textSize = size < 1 ? 1 : size; }
     void setTextWrap(bool) {}
 
     void setCursor(int x, int y) {
@@ -90,7 +91,7 @@ public:
 
     size_t write(uint8_t c) {
         hostPanel.glyphs.push_back(HostGlyph{hostPanel.cursorX, hostPanel.cursorY, static_cast<char>(c)});
-        hostPanel.cursorX += 6;
+        hostPanel.cursorX += 6 * hostPanel.textSize;
         return 1;
     }
 

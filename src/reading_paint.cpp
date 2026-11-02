@@ -11,7 +11,7 @@ void ReadingPage::paint(size_t offset, bool fullRefresh) {
     do {
         display.fillScreen(GxEPD_WHITE);
         display.setTextColor(GxEPD_BLACK);
-        display.setTextSize(kTextSize);
+        display.setTextSize(kFontSize);
         display.setTextWrap(false);
 
         int y = kMarginY;

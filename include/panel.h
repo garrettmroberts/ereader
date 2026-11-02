@@ -13,9 +13,12 @@
 
 extern GxEPD2_BW<GxEPD2_213_B74, MAX_HEIGHT(GxEPD2_213_B74)> display;
 
-constexpr int kTextSize = 1;
-constexpr int kCharW = 6 * kTextSize;
-constexpr int kLineH = 8 * kTextSize;
+// Built-in font scale for every screen. 1 is 6×8 pixels; 2 is 12×16; and so on.
+// Pagination uses the same constant, so changing it reflows each page.
+constexpr int kFontSize = 1;
+static_assert(kFontSize >= 1, "kFontSize must be at least 1");
+constexpr int kCharW = 6 * kFontSize;
+constexpr int kLineH = 8 * kFontSize;
 constexpr int kMarginX = 5;
 constexpr int kMarginY = 10;
 
