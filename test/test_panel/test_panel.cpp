@@ -76,6 +76,21 @@ std::string tjpg(unsigned width, unsigned height, uint8_t red, uint8_t green, ui
     return out;
 }
 
+std::string fitLine(const std::string& text) {
+    const int maxWidth = display.width() - kMarginX * 2;
+    std::string out;
+    int used = 0;
+    for (unsigned char c : text) {
+        const int advance = glyphAdvance(c);
+        if (!out.empty() && used + advance > maxWidth) {
+            break;
+        }
+        used += advance;
+        out.push_back(static_cast<char>(c));
+    }
+    return out;
+}
+
 std::string textAt(int y) {
     std::string out;
     for (const HostGlyph& glyph : hostPanel.glyphs) {
@@ -196,14 +211,14 @@ extern "C" void test_refresh_schedule_and_reading_paint(void) {
 extern "C" void test_reading_paint_skips_carriage_returns(void) {
     reading.text = "hi\rthere\nnext";
     reading.paint(0, true);
-    TEST_ASSERT_EQUAL_STRING("hithere", textAt(kMarginY).c_str());
-    TEST_ASSERT_EQUAL_STRING("next", textAt(kMarginY + kLineH).c_str());
+    TEST_ASSERT_EQUAL_STRING("hithere", textAt(textBaseline(kMarginY)).c_str());
+    TEST_ASSERT_EQUAL_STRING("next", textAt(textBaseline(kMarginY + kLineH)).c_str());
     TEST_ASSERT_EQUAL_INT(1, hostPanel.fillCount);
 
     hostPanel.reset();
     reading.paint(9, true);
-    TEST_ASSERT_EQUAL_STRING("next", textAt(kMarginY).c_str());
-    TEST_ASSERT_TRUE(textAt(kMarginY + kLineH).empty());
+    TEST_ASSERT_EQUAL_STRING("next", textAt(textBaseline(kMarginY)).c_str());
+    TEST_ASSERT_TRUE(textAt(textBaseline(kMarginY + kLineH)).empty());
 
     hostPanel.reset();
     reading.text = "";
@@ -241,28 +256,28 @@ extern "C" void test_library_partial_does_not_spend_a_refresh(void) {
 
 extern "C" void test_library_caption_author_title_and_index(void) {
     library.paint(true);
-    TEST_ASSERT_EQUAL_STRING("No books", textAt(4).c_str());
+    TEST_ASSERT_EQUAL_STRING("No books", textAt(textBaseline(4)).c_str());
     TEST_ASSERT_TRUE(hostPanel.printed.empty());
     TEST_ASSERT_NOT_NULL(strstr(Serial.out.c_str(), "Library 1/0 No books"));
     TEST_ASSERT_EQUAL_INT(0, releases);
 
     showBook("/Austen/pride.epub");
     library.paint(true);
-    TEST_ASSERT_EQUAL_STRING("Austen", textAt(4).c_str());
-    TEST_ASSERT_EQUAL_STRING("pride", textAt(4 + kLineH).c_str());
+    TEST_ASSERT_EQUAL_STRING("Austen", textAt(textBaseline(4)).c_str());
+    TEST_ASSERT_EQUAL_STRING("pride", textAt(textBaseline(4 + kLineH)).c_str());
     TEST_ASSERT_EQUAL_STRING("1/1", hostPanel.printed.c_str());
     const int footer = display.height() - kMarginY - kLineH;
-    TEST_ASSERT_EQUAL_INT(footer, hostPanel.printY);
-    TEST_ASSERT_EQUAL_INT((display.width() - 3 * kCharW) / 2, hostPanel.printX);
+    TEST_ASSERT_EQUAL_INT(textBaseline(footer), hostPanel.printY);
+    TEST_ASSERT_EQUAL_INT((display.width() - textWidth("1/1")) / 2, hostPanel.printX);
 
     showBook("/Krakauer/BOOK1.EPU");
     library.paint(true);
-    TEST_ASSERT_EQUAL_STRING("Krakauer", textAt(4).c_str());
-    TEST_ASSERT_EQUAL_STRING("BOOK1", textAt(4 + kLineH).c_str());
+    TEST_ASSERT_EQUAL_STRING("Krakauer", textAt(textBaseline(4)).c_str());
+    TEST_ASSERT_EQUAL_STRING("BOOK1", textAt(textBaseline(4 + kLineH)).c_str());
 
     showBook("/A/notes.epub.bak");
     library.paint(true);
-    TEST_ASSERT_EQUAL_STRING("notes.epub.bak", textAt(4 + kLineH).c_str());
+    TEST_ASSERT_EQUAL_STRING(fitLine("notes.epub.bak").c_str(), textAt(textBaseline(4 + kLineH)).c_str());
 
     std::string word;
     for (char c = 'a'; c <= 'z'; c++) {
@@ -270,12 +285,14 @@ extern "C" void test_library_caption_author_title_and_index(void) {
     }
     showBook((word + ".epub").c_str());
     library.paint(true);
-    TEST_ASSERT_EQUAL_STRING(word.substr(0, charsPerLine()).c_str(), textAt(4).c_str());
-    TEST_ASSERT_EQUAL_STRING(word.substr(charsPerLine()).c_str(), textAt(4 + kLineH).c_str());
+    const std::string first = fitLine(word);
+    const std::string second = fitLine(word.substr(first.size()));
+    TEST_ASSERT_EQUAL_STRING(first.c_str(), textAt(textBaseline(4)).c_str());
+    TEST_ASSERT_EQUAL_STRING(second.c_str(), textAt(textBaseline(4 + kLineH)).c_str());
 
     showBook("");
     library.paint(true);
-    TEST_ASSERT_EQUAL_STRING("No books", textAt(4).c_str());
+    TEST_ASSERT_EQUAL_STRING("No books", textAt(textBaseline(4)).c_str());
     TEST_ASSERT_EQUAL_STRING("1/1", hostPanel.printed.c_str());
 
     const std::string author(80, 'Z');
@@ -283,7 +300,7 @@ extern "C" void test_library_caption_author_title_and_index(void) {
     library.paint(true);
     TEST_ASSERT_NOT_NULL(strstr(Serial.out.c_str(), std::string(63, 'Z').c_str()));
     TEST_ASSERT_NULL(strstr(Serial.out.c_str(), std::string(64, 'Z').c_str()));
-    TEST_ASSERT_EQUAL_STRING("book", textAt(4 + kLineH).c_str());
+    TEST_ASSERT_EQUAL_STRING("book", textAt(textBaseline(4 + kLineH)).c_str());
 }
 
 extern "C" void test_sidecar_cover_is_scaled_cached_and_evicted(void) {
@@ -406,7 +423,7 @@ extern "C" void test_rejected_covers_are_not_cached(void) {
     showBook("/.epub");
     library.paint(true);
     TEST_ASSERT_NOT_NULL(strstr(Serial.out.c_str(), "Cover missing"));
-    TEST_ASSERT_EQUAL_STRING("No books", textAt(4).c_str());
+    TEST_ASSERT_EQUAL_STRING("No books", textAt(textBaseline(4)).c_str());
 }
 
 extern "C" void test_epub_cover_extract_and_stored_image(void) {

@@ -312,21 +312,22 @@ void bookCaption(const char* path, char* author, size_t authorSize, char* title,
     }
 }
 
-int paintText(const char* text, int x, int y, int maxCols, int maxLines) {
+int paintText(const char* text, int x, int y, int maxWidth, int maxLines) {
     int line = 0;
-    int col = 0;
-    display.setCursor(x, y);
+    int used = 0;
+    display.setCursor(x, textBaseline(y));
     for (const char* p = text; *p != '\0' && line < maxLines; p++) {
-        if (col >= maxCols) {
+        const int advance = glyphAdvance(static_cast<unsigned char>(*p));
+        if (used > 0 && used + advance > maxWidth) {
             line++;
-            col = 0;
+            used = 0;
             if (line >= maxLines) {
                 break;
             }
-            display.setCursor(x, y + line * kLineH);
+            display.setCursor(x, textBaseline(y + line * kLineH));
         }
         display.write(static_cast<uint8_t>(*p));
-        col++;
+        used += advance;
     }
     return y + (line + 1) * kLineH;
 }
@@ -361,7 +362,7 @@ void LibraryPage::paint(bool fullRefresh) {
     char book[64];
     bookCaption(count == 0 ? nullptr : epubPath, author, sizeof(author), book, sizeof(book));
     const char* title = count == 0 || book[0] == '\0' ? "No books" : book;
-    const int cols = charsPerLine();
+    const int width = textLineWidth();
     const int titleBottom = 4 + 2 * kLineH;
     const int footerTop = display.height() - kMarginY - kLineH;
     const int maxW = display.width() - 4;
@@ -380,8 +381,7 @@ void LibraryPage::paint(bool fullRefresh) {
     }
 
     display.setTextColor(GxEPD_BLACK);
-    display.setTextSize(kFontSize);
-    display.setTextWrap(false);
+    applyTextStyle();
 
     // Library moves stay partial. A full refresh here is a multi-second flash.
     if (fullRefresh) {
@@ -395,10 +395,10 @@ void LibraryPage::paint(bool fullRefresh) {
     do {
         display.fillScreen(GxEPD_WHITE);
         if (author[0] == '\0') {
-            paintText(title, kMarginX, 4, cols > 0 ? cols : 1, 2);
+            paintText(title, kMarginX, 4, width > 0 ? width : 1, 2);
         } else {
-            paintText(author, kMarginX, 4, cols > 0 ? cols : 1, 1);
-            paintText(title, kMarginX, 4 + kLineH, cols > 0 ? cols : 1, 1);
+            paintText(author, kMarginX, 4, width > 0 ? width : 1, 1);
+            paintText(title, kMarginX, 4 + kLineH, width > 0 ? width : 1, 1);
         }
         if (haveCover && bits != nullptr) {
             const int x = (display.width() - imageW) / 2;
@@ -406,8 +406,8 @@ void LibraryPage::paint(bool fullRefresh) {
             paintCover(x, y, bits, imageW, imageH);
         }
         if (label[0] != '\0') {
-            const int labelW = static_cast<int>(strlen(label)) * kCharW;
-            display.setCursor((display.width() - labelW) / 2, footerTop);
+            const int labelW = textWidth(label);
+            display.setCursor((display.width() - labelW) / 2, textBaseline(footerTop));
             display.print(label);
         }
     } while (display.nextPage());

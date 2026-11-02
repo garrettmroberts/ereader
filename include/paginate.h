@@ -18,3 +18,10 @@ PageLayout layoutPage(const char* text, size_t length, size_t offset, int column
 
 // Byte offset where each page starts.
 std::vector<size_t> pageOffsets(const char* text, size_t length, int columns, int rows);
+
+// Same line breaking, measured in pixels. `advance` returns the width of one byte.
+PageLayout layoutFitted(const char* text, size_t length, size_t offset, int maxWidth, int rows,
+                        int (*advance)(unsigned char));
+
+std::vector<size_t> pageOffsetsFitted(const char* text, size_t length, int maxWidth, int rows,
+                                      int (*advance)(unsigned char));

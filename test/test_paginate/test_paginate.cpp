@@ -123,6 +123,24 @@ extern "C" void test_page_offsets_cover_the_text(void) {
     TEST_ASSERT_EQUAL_INT(strlen(text), cursor);
 }
 
+int wideM(unsigned char c) {
+    return c == 'M' ? 4 : 1;
+}
+
+extern "C" void test_fitted_layout_uses_glyph_widths(void) {
+    const char* pair = "MM";
+    const PageLayout split = layoutFitted(pair, 2, 0, 4, 2, wideM);
+    TEST_ASSERT_EQUAL_INT(2, split.lines.size());
+    TEST_ASSERT_EQUAL_STRING("M", slice(pair, split.lines[0]).c_str());
+    TEST_ASSERT_EQUAL_STRING("M", slice(pair, split.lines[1]).c_str());
+
+    const char* mixed = "i M M";
+    const PageLayout page = layoutFitted(mixed, strlen(mixed), 0, 6, 2, wideM);
+    TEST_ASSERT_EQUAL_INT(2, page.lines.size());
+    TEST_ASSERT_EQUAL_STRING("i M", slice(mixed, page.lines[0]).c_str());
+    TEST_ASSERT_EQUAL_STRING("M", slice(mixed, page.lines[1]).c_str());
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_empty_and_rejected_input);
@@ -131,5 +149,6 @@ int main(int, char**) {
     RUN_TEST(test_newlines_and_carriage_returns);
     RUN_TEST(test_splits_words_longer_than_the_line);
     RUN_TEST(test_page_offsets_cover_the_text);
+    RUN_TEST(test_fitted_layout_uses_glyph_widths);
     return UNITY_END();
 }
